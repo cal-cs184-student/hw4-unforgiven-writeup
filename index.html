@@ -28,82 +28,144 @@
 	<body>
 		<div class="container">
 		<h1>CS184/284A Fall 2026 Homework 4 Write-Up</h1>
-		<div style="text-align: center;">Names: </div>
+		<div style="text-align: center;">Names: Allan Tsay </div>
 
 		<br>
 
-		Link to webpage: (TODO) <a href="https://cs184.eecs.berkeley.edu/fa26">cs184.eecs.berkeley.edu/fa26</a>
+		Link to webpage: <a href="https://cal-cs184-student.github.io/hw4-unforgiven-writeup/">cal-cs184-student.github.io/hw4-unforgiven-writeup</a>
 
 		<br>
 
-		Link to GitHub repository: (TODO) <a href="https://cs184.eecs.berkeley.edu/fa26">cs184.eecs.berkeley.edu/fa26</a>
-
-		<figure>
-			<img src="assets/clothsim.png" alt="Cloth draped over sphere" style="width:70%"/>
-			<figcaption>You can add images with captions!</figcaption>
-		</figure>
-
-		<!--
-		We've already added one heading per part, to make your write-up as navigable when grading. Please fit your write-up within these sections!
-		-->
+		Link to GitHub repository: <a href="https://github.com/cal-cs184-student/hw4-unforgiven-writeup">github.com/cal-cs184-student/hw4-unforgiven-writeup</a>
 
 		<h2>Overview</h2>
 		Give a high-level overview of what you implemented in this homework. Think about what you've built as a whole. Share your thoughts on what interesting things you've learned from completing the homework.
 
 		<h2>Part 1: Masses and springs</h2>
-		Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
-
-		<p>Here is an example 2x2 gridlike structure using an HTML table. Each <b>tr</b> is a row and each <b>td</b> is a column in that row. You might find this useful for framing and showing your result images in an organized fashion.</p>
+		<p>I implemented <b>Cloth::buildGrid()</b> to lay out a <i>num_width_points</i> x <i>num_height_points</i> grid of point masses, stored row-major (index = y * num_width_points + x). Points are spaced width/(num_width_points-1) and height/(num_height_points-1) apart. For a horizontal cloth the grid lies in the plane y = 1; for a vertical cloth it lies in the xy-plane with a small random z offset (within &plusmn;1/1000) so the cloth buckles in a consistent way instead of staying perfectly flat. Points listed in the scene's <i>pinned</i> array (as [x, y] indices) are marked pinned.</p>
+		<p>I then connected neighboring masses with three kinds of springs, each created once per pair of points (with bounds checks at the edges):</p>
+		<ul>
+			<li><b>Structural:</b> each point to its left neighbor and the neighbor above it.</li>
+			<li><b>Shearing:</b> each point to its up-left and up-right diagonal neighbors.</li>
+			<li><b>Bending:</b> each point to the point two away to the left and two away above.</li>
+		</ul>
+		<p>Rest lengths come from the initial positions. Below are wireframe views of scene/pinned2.json.</p>
 		<div style="display: flex; flex-direction: column; align-items: center;">
 			<table style="width: 100%; text-align: center; border-collapse: collapse;">
 			  <tr>
 				<td style="text-align: center;">
-				  <img src="assets/clothsim.png" width="400px"/>
-				  <figcaption>Caption goes here.</figcaption>
+				  <img src="assets/part1_no_shearing.png" width="400px"/>
+				  <figcaption>Without shearing constraints (structural + bending only)</figcaption>
 				</td>
 				<td style="text-align: center;">
-				  <img src="assets/clothsim.png" width="400px"/>
-				  <figcaption>Caption goes here.</figcaption>
-				</td>
-			  </tr>
-			  <tr>
-				<td style="text-align: center;">
-				  <img src="assets/clothsim.png" width="400px"/>
-				  <figcaption>Caption goes here.</figcaption>
+				  <img src="assets/part1_only_shearing.png" width="400px"/>
+				  <figcaption>Only shearing constraints</figcaption>
 				</td>
 				<td style="text-align: center;">
-				  <img src="assets/clothsim.png" width="400px"/>
-				  <figcaption>Caption goes here.</figcaption>
+				  <img src="assets/part1_all.png" width="400px"/>
+				  <figcaption>All constraints</figcaption>
 				</td>
 			  </tr>
 			</table>
 		</div>
 
 		<h2>Part 2: Simulation via numerical integration</h2>
-		Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+		<p>I implemented <b>Cloth::simulate()</b> in three stages each timestep (with <i>mass</i> = width &middot; height &middot; density / (num_width_points &middot; num_height_points) and &Delta;t = 1 / (frames_per_sec &middot; simulation_steps)):</p>
+		<ol>
+			<li><b>Forces.</b> Each point mass's force is reset to the external force (the sum of external accelerations times its mass, i.e. gravity). Then for every enabled spring type (structural / shearing / bending) I apply Hooke's law: \( F = k_s(\|p_b - p_a\| - \ell_0) \), directed along the spring, added to <i>a</i> and subtracted from <i>b</i>. Bending springs use \(0.2\,k_s\) since they should resist bending much less than stretching.</li>
+			<li><b>Verlet integration.</b> For every non-pinned mass, \( x_{t+\Delta t} = x_t + (1-d)(x_t - x_{t-\Delta t}) + \frac{F}{m}\Delta t^2 \), where \(d\) is the damping value (a fraction, 0.2 by default). Pinned masses never move.</li>
+			<li><b>Position constraint [Provot 1995].</b> After integrating, any spring longer than 1.1 &times; its rest length is corrected by moving its endpoints back toward each other by the excess: half each, all of it on the free mass if the other is pinned, and nothing if both are pinned. This stops the cloth from becoming unstable with stiff springs / large steps.</li>
+		</ol>
+
+		<h3>Effect of the spring constant <i>ks</i></h3>
+		<p>(Defaults for pinned4.json: ks = 5000, density = 150, damping = 0.2; only one parameter was changed at a time.)</p>
+		<p><b>Low ks:</b> the springs are weak relative to the cloth's weight, so the cloth stretches a lot under gravity and sags deeply between the pinned corners. It falls slowly-to-moderately, overshoots, and bounces/oscillates for a long time before settling at a visibly stretched, droopy rest shape. The 10% stretch constraint is what ultimately limits how much it can elongate. <b>High ks:</b> the cloth barely stretches and snaps back quickly, so it settles into a taut, shallow sag and reaches rest sooner with small high-frequency jitter at the start. With very high ks the system becomes stiff (the restoring force changes a lot within one &Delta;t), which makes it less stable, and it relies more on the Provot constraint to avoid blowing up.</p>
+
+		<h3>Effect of density</h3>
+		<p>Density only scales the mass, and gravity force is \(m g\), so the springs must now hold up more weight. <b>High density</b> acts like lowering ks: the cloth is heavier relative to its springs, stretches more, and sags deeper (and rests lower). <b>Low density</b> makes the cloth light and "stiff"-looking: it hangs flatter and tighter between the pins, with less overshoot. (Acceleration from gravity is the same either way since \(a = g\); the difference is in how much spring force is needed to counter it.)</p>
+
+		<h3>Effect of damping</h3>
+		<p><b>Zero/low damping:</b> energy is only lost to the stretch constraint, so the cloth keeps swinging and rippling for a long time and takes a very long time to reach rest. <b>High damping:</b> velocity is removed each step, so the cloth moves as if in thick fluid: it falls slowly, doesn't oscillate, and settles into a smooth rest shape quickly. At damping = 1 the velocity term vanishes entirely and the cloth creeps down in an overdamped way.</p>
+
+		<h3>Final resting state of scene/pinned4.json</h3>
+		<figure>
+			<img src="assets/part2_pinned4_rest.png" alt="Shaded pinned4 cloth at rest" style="width:50%"/>
+			<figcaption>Cloth from scene/pinned4.json at rest (wireframe view). Parameters: default (ks = 5000, density = 150, damping = 0.2).</figcaption>
+		</figure>
 
 		<h2>Part 3: Handling collisions with other objects</h2>
-		Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+		<p>After the Verlet step in <b>Cloth::simulate()</b>, every point mass is tested against every <i>CollisionObject</i> by calling its <b>collide(PointMass &amp;)</b>. Both primitives use the same idea: if a point mass has ended up inside (or on the wrong side of) the surface, move it back onto the surface, and scale the correction by \((1 - f)\), where \(f\) is the object's friction. Concretely, the new position is \( x_{new} = x_{last} + (1-f)\,(p_{tangent} - x_{last}) \), where \(p_{tangent}\) is the "tangent point" on the surface and \(x_{last}\) is the mass's position at the previous time step. Since Verlet integration derives velocity from the last position, snapping to the surface also removes the inward velocity, and friction makes the mass lose some of its sliding motion.</p>
+		<p><b>Spheres.</b> Let \(d = x - o\) be the vector from the sphere origin \(o\) to the point mass. If \(\|d\| &lt; r\) the point is inside the sphere. The tangent point is where the ray from the origin through the point exits the sphere: \( p_{tangent} = o + r\,d/\|d\| \). I then apply the correction above (with a guard for the degenerate case \(d = 0\)).</p>
+		<p><b>Planes.</b> For a plane with point \(p_0\) and unit normal \(n\), I compute the signed distance of both the current and the last position, \( s = (x - p_0)\cdot n \). If the signs differ (or the mass is exactly on the plane), the mass crossed the plane during this step. The tangent point is the current position projected onto the plane, \( x - s\,n \), pushed by a small <i>SURFACE_OFFSET</i> (0.0001) along the normal toward the side the mass came from, so the cloth rests just above the plane rather than exactly on it (which avoids z-fighting and re-crossing from numerical error). Using the last position to decide which side the mass came from means fast-moving masses can't tunnel through the plane. Then the same friction-scaled correction is applied.</p>
+
+		<h3>Cloth resting on the sphere (scene/sphere.json) for different <i>ks</i></h3>
+		<div style="display: flex; flex-direction: column; align-items: center;">
+			<table style="width: 100%; text-align: center; border-collapse: collapse;">
+			  <tr>
+				<td><img src="assets/part3_sphere_ks500.png" width="300px"/><figcaption>ks = 500</figcaption></td>
+				<td><img src="assets/part3_sphere_ks5000.png" width="300px"/><figcaption>ks = 5000 (default)</figcaption></td>
+				<td><img src="assets/part3_sphere_ks50000.png" width="300px"/><figcaption>ks = 50000</figcaption></td>
+			  </tr>
+			</table>
+		</div>
+		<p><b>ks = 500:</b> the springs are soft, so the cloth stretches under its own weight and hugs the sphere closely. It hangs the lowest and the sides fall nearly straight down in many narrow, tight folds, with a slightly jagged edge where the stretch constraint is doing the work. <b>ks = 5000 (default):</b> a middle ground; the cloth still drapes closely over the top but the folds are fewer and broader, and the hem hangs a bit higher. <b>ks = 50000:</b> the cloth is very stiff and barely stretches, so it is held out like a tent. It spreads wide, hangs noticeably shorter, and has only a few large, smooth folds, with the corners flaring outward instead of falling straight down. In short, higher ks gives a stiffer, smoother, more spread-out drape, and lower ks gives a heavier, more clinging drape with more small wrinkles.</p>
+
+		<h3>Cloth at rest on the plane (scene/plane.json)</h3>
+		<figure>
+			<img src="assets/part3_plane.png" alt="Shaded cloth resting on the plane" style="width:50%"/>
+			<figcaption>Cloth lying at rest on the plane.</figcaption>
+		</figure>
 
 		<h2>Part 4: Handling self-collisions</h2>
-		Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+		<p>Checking every pair of point masses for overlap would be \(O(n^2)\), so I used spatial hashing. Each timestep, after Verlet integration, <b>build_spatial_map()</b> clears the map and puts every point mass into a bucket keyed by <b>hash_position()</b>. The hash partitions space into 3D boxes of size \(w \times h \times t\) with \(w = 3\,\text{width}/\text{num\_width\_points}\), \(h = 3\,\text{height}/\text{num\_height\_points}\), \(t = \max(w, h)\); a position is floored to integer box coordinates, which are combined into a single float key \(((x\cdot 41 + y)\cdot 41 + z)\). Different boxes can occasionally share a key, which is harmless because candidates are distance-checked.</p>
+		<p><b>self_collide()</b> then looks only at the other point masses in the same bucket as <i>pm</i>. For each one closer than \(2\cdot\)thickness, it computes a correction vector pointing away from that mass with length \(2\cdot\text{thickness} - \text{dist}\), so the two end up exactly \(2\cdot\)thickness apart. The corrections are averaged over the colliding masses and divided by <i>simulation_steps</i>, then added to the position, so a mass isn't pushed too violently in a single step.</p>
+		<h3>Cloth falling and folding on itself (scene/selfCollision.json, default density = 150, ks = 5000)</h3>
+		<table style="width: 100%; text-align: center; border-collapse: collapse;"><tr><td><img src="assets/part4_default_1.png" width="280px"/><figcaption>First self-collision</figcaption></td><td><img src="assets/part4_default_2.png" width="280px"/><figcaption>Folding on itself</figcaption></td><td><img src="assets/part4_default_3.png" width="280px"/><figcaption>Near rest</figcaption></td></tr></table>
+		<p>(TODO: describe the sequence: the cloth falls flat onto the plane, first contacts itself where it crumples, layers pile up without passing through each other, and it eventually settles into a stack of folds.)</p>
+
+		<h3>Varying density</h3>
+		<table style="width: 100%; text-align: center; border-collapse: collapse;"><tr><td><img src="assets/part4_density_low.png" width="280px"/><figcaption>Low density</figcaption></td><td><img src="assets/part4_density_high.png" width="280px"/><figcaption>High density</figcaption></td></tr></table>
+		<p>Both screenshots were taken at a similar point in the fall. <b>Low density:</b> the cloth is light, so the springs easily keep it spread out. It falls as an almost flat sheet and lands lying nearly flat on the plane, with only a small ripple along one edge, and it has barely started to fold on itself. <b>High density:</b> the cloth is heavy relative to what its springs can support, so it stretches and sags and the weight drives it to bunch up. It forms large, deep parallel folds that hang over and lie on top of the cloth beneath, with several layers stacked and the cloth clearly colliding with itself. In short, a heavier cloth collapses into bigger, more pronounced folds with more self-contact, and a lighter cloth stays flatter and smoother. (Density scales the mass, so gravity's pull relative to the spring force is what changes.)</p>
+
+		<h3>Varying ks</h3>
+		<table style="width: 100%; text-align: center; border-collapse: collapse;"><tr><td><img src="assets/part4_ks_50.png" width="280px"/><figcaption>ks = 50</figcaption></td><td><img src="assets/part4_ks_500.png" width="280px"/><figcaption>ks = 500</figcaption></td><td><img src="assets/part4_ks_50000.png" width="280px"/><figcaption>ks = 50000</figcaption></td></tr></table>
+		<p>All three show the cloth near rest on the plane. <b>ks = 50:</b> the springs are very weak, so the cloth crumples into a thin, flat, heavily wrinkled pile of many tiny, chaotic folds that lie close together; it doesn't hold any large shape. <b>ks = 500:</b> the cloth holds together somewhat better, giving a slightly thicker pile with a mix of small wrinkles and a few larger folds that overlap one another. <b>ks = 50000:</b> the cloth is stiff, so instead of crumpling it rolls into a few long, smooth, parallel tube-like folds stacked on top of each other, with very few small wrinkles. In all cases the layers don't pass through each other, so self-collision is working; the difference is that higher ks produces fewer, larger and smoother folds, and lower ks produces many small ones.</p>
 
 		<h2>Part 5: Shaders</h2>
-		Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+		<h3>What is a shader program?</h3>
+		<p>A shader program is a small program that runs on the GPU, once for each vertex or each pixel, in parallel. It is made of (at least) two stages linked together. The <b>vertex shader</b> runs once per vertex: it takes the per-vertex inputs (position, normal, tangent, uv), transforms them (model matrix, then view-projection), and writes the clip-space position <i>gl_Position</i> for the rasterizer. It can also pass values on as "out" variables, such as the world-space position, normal and uv. The rasterizer then turns the triangles into fragments and <b>interpolates</b> those out variables across each triangle (like barycentric interpolation in the rasterizer project). The <b>fragment shader</b> runs once per fragment with those interpolated values as its "in" variables, plus uniforms like the light position, camera position and textures, and computes the final pixel color. Lighting and material effects come from this split: the vertex shader supplies the geometry and surface information at each point, and the fragment shader uses that to evaluate a lighting model (or look up a texture) per pixel. The vertex shader can also change geometry itself, as in displacement mapping.</p>
 
-		<h2>(Optional) Part 6: Extra Credit - Additional cloth simulation features!</h2>
-		Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
-		
-		<h2>Additional Notes (please remove)</h2>
+		<h3>Blinn-Phong shading</h3>
+		<p>Blinn-Phong approximates the light reflected at a surface point as the sum of three terms, using the surface normal \(n\), the unit direction to the light \(l\), the unit direction to the camera \(v\), and the half vector \(h = (l+v)/\|l+v\|\):</p>
+		\[ L = k_a I_a + k_d \frac{I}{r^2}\max(0, n\cdot l) + k_s \frac{I}{r^2}\max(0, n\cdot h)^p \]
 		<ul>
-			<li>You can also add code if you'd like as so: <code>code code code</code></li>
-			<li>If you'd like to add math equations, 
-				<ul>
-					<li>You can write inline equations like so: \( a^2 + b^2 = c^2 \)</li>
-					<li>You can write display equations like so: \[ a^2 + b^2 = c^2 \]</li>
-				</ul>
-			</li>
+			<li><b>Ambient</b> (\(k_a I_a\)) is a constant that stands in for light bounced around the scene, so surfaces facing away from the light are not pure black. It doesn't depend on direction at all, so it looks flat.</li>
+			<li><b>Diffuse</b> models rough surfaces that scatter light equally in all directions. Brightness depends only on the angle between the normal and the light (Lambert's cosine law) and falls off with the squared distance \(r^2\) to the light. It doesn't depend on the viewer.</li>
+			<li><b>Specular</b> models the shiny highlight. It is strongest when the half vector is aligned with the normal, i.e. when the mirror reflection of the light points toward the camera. The exponent \(p\) controls how tight the highlight is (higher = smaller, sharper).</li>
 		</ul>
+		<p>I used \(k_a = 0.1\), \(I_a = 1\), \(k_s = 0.6\), \(p = 64\), and the cloth's color as \(k_d\).</p>
+		<table style="width: 100%; text-align: center; border-collapse: collapse;"><tr><td><img src="assets/part5_ambient.png" width="280px"/><figcaption>Ambient only</figcaption></td><td><img src="assets/part5_diffuse.png" width="280px"/><figcaption>Diffuse only</figcaption></td></tr></table><table style="width: 100%; text-align: center; border-collapse: collapse;"><tr><td><img src="assets/part5_specular.png" width="280px"/><figcaption>Specular only</figcaption></td><td><img src="assets/part5_phong.png" width="280px"/><figcaption>Full Blinn-Phong</figcaption></td></tr></table>
+
+		<h3>Texture mapping</h3>
+		<p>The fragment shader just samples <i>u_texture_1</i> at the interpolated uv coordinate and outputs that color. (TODO: describe your custom texture.)</p>
+		<figure><img src="assets/part5_texture.png" style="width:50%"/><figcaption>Texture mapping with a custom texture</figcaption></figure>
+
+		<h3>Bump mapping and displacement mapping</h3>
+		<p><b>Bump mapping</b> (fragment shader) leaves the geometry alone and only perturbs the normal used for lighting. The height map \(h(u,v)\) is read from the texture, and the local-space normal is built from finite differences: \(dU = (h(u+1/w, v) - h(u,v))\cdot k_h k_n\), \(dV = (h(u, v+1/h) - h(u,v))\cdot k_h k_n\), and \(n_{local} = (-dU, -dV, 1)\), where \(w, h\) are the texture dimensions and \(k_h, k_n\) are the height and normal scalings. This is rotated to world space by the TBN matrix (tangent, bitangent = \(n\times t\), normal) and then used in Blinn-Phong. <b>Displacement mapping</b> (vertex shader) actually moves each vertex along its normal by \(h(u,v)\cdot k_h\), so the silhouette really changes; the fragment shader is plain Blinn-Phong.</p>
+		<table style="width: 100%; text-align: center; border-collapse: collapse;"><tr><td><img src="assets/part5_bump_cloth.png" width="280px"/><figcaption>Bump mapping, cloth</figcaption></td><td><img src="assets/part5_bump_sphere.png" width="280px"/><figcaption>Bump mapping, sphere</figcaption></td><td><img src="assets/part5_disp_sphere.png" width="280px"/><figcaption>Displacement mapping, sphere</figcaption></td></tr></table>
+		<p>(TODO: state which texture you used for both.) Bump mapping only fakes the detail: the sphere's outline stays perfectly round and the bumps look like they are painted on, especially at grazing angles. Displacement mapping produces real bumps with a changed silhouette and self-occlusion, but the quality depends on how many vertices there are, since heights are only applied at vertices and the triangles between them are interpolated.</p>
+		<p><b>Sphere coarseness.</b></p>
+		<table style="width: 100%; text-align: center; border-collapse: collapse;"><tr><td><img src="assets/part5_bump_16.png" width="220px"/><figcaption>Bump, -o 16 -a 16</figcaption></td><td><img src="assets/part5_bump_128.png" width="220px"/><figcaption>Bump, -o 128 -a 128</figcaption></td><td><img src="assets/part5_disp_16.png" width="220px"/><figcaption>Displacement, -o 16 -a 16</figcaption></td><td><img src="assets/part5_disp_128.png" width="220px"/><figcaption>Displacement, -o 128 -a 128</figcaption></td></tr></table>
+		<p>(TODO: confirm against screenshots. Expected: bump mapping looks nearly the same at both resolutions, since it works per-pixel using the texture and only uses the vertex normals/tangents interpolated across triangles; at 16 the outline is visibly faceted. Displacement mapping depends heavily on the mesh: at 16x16 there are too few vertices to sample the height map, so the detail is blocky and coarse and doesn't resemble the texture; at 128x128 it captures much more of the texture detail and looks like real bumps.)</p>
+
+		<h3>Mirror shader</h3>
+		<p>For each fragment, I compute the view direction \(w_o\) from the surface point to the camera, reflect it about the normal, \(w_i = 2(n\cdot w_o)n - w_o\) (GLSL <i>reflect(-wo, n)</i>), and use \(w_i\) to look up the environment cube map. The surface therefore shows the part of the environment it would reflect.</p>
+		<table style="width: 100%; text-align: center; border-collapse: collapse;"><tr><td><img src="assets/part5_mirror_cloth.png" width="280px"/><figcaption>Mirror, cloth</figcaption></td><td><img src="assets/part5_mirror_sphere.png" width="280px"/><figcaption>Mirror, sphere</figcaption></td></tr></table>
+
+		<h3>Custom shader</h3>
+		<p>I wrote a toon (cel) shader with a rim light. The color comes from a gradient across the cloth's uv coordinates (pink to blue to yellow). The diffuse term \(\max(0, n\cdot l)\) is quantized into 4 bands with <i>floor</i> to get the flat cartoon look. The specular highlight is thresholded with <i>step</i> into a hard white spot, and a rim term \((1 - n\cdot v)^3\) is thresholded to add a light blue outline on edges that face away from the camera. The normal is flipped for back faces so the underside of the cloth is lit properly.</p>
+		<figure><img src="assets/part5_custom.png" style="width:50%"/><figcaption>Custom toon shader</figcaption></figure>
+
 		</div>
 	</body>
 </html>
